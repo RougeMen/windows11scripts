@@ -1,0 +1,71 @@
+# =========================================================================
+# SELF-ELEVATION BOOTLOADER (Enables Administrator Double-Click Execution)
+# =========================================================================
+$myWindowsID = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+$myWindowsPrincipal = New-Object System.Security.Principal.WindowsPrincipal($myWindowsID)
+$adminRole = [System.Security.Principal.WindowsBuiltInRole]::Administrator
+
+if (-not $myWindowsPrincipal.IsInRole($adminRole)) {
+    $newArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+    Start-Process powershell -ArgumentList $newArguments -Verb RunAs
+    Exit
+}
+
+# =========================================================================
+# MASTER PACKAGE MANAGER PROVISIONING SCRIPT
+# =========================================================================
+Set-ExecutionPolicy Bypass -Scope Process -Force
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+
+Write-Host "=== Starting Total Package Manager Provisioning ===" -ForegroundColor Cyan
+
+Write-Host "`n[1/8] Configuring WinGet sources..." -ForegroundColor Yellow
+winget source reset --force
+winget upgrade --all --accept-source-agreements --accept-package-agreements --silent *>$null
+
+Write-Host "`n[2/8] Checking Chocolatey..." -ForegroundColor Yellow
+if (!(Get-Command choco -ErrorAction SilentlyContinue)) {
+    Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org'))
+} else { Write-Host "Chocolatey is already installed." -ForegroundColor Green }
+
+Write-Host "`n[3/8] Checking Scoop..." -ForegroundColor Yellow
+if (!(Get-Command scoop -ErrorAction SilentlyContinue)) {
+    $env:SCOOP='C:\Scoop'
+    [Environment]::SetEnvironmentVariable('SCOOP', $env:SCOOP, 'Machine')
+    Invoke-Expression (New-Object System.Net.WebClient).DownloadString('https://scoop.sh')
+} else { Write-Host "Scoop is already installed." -ForegroundColor Green }
+
+Write-Host "`n[4/8] Installing Git..." -ForegroundColor Yellow
+winget install --id Git.Git --exact --accept-source-agreements --accept-package-agreements --silent
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+
+Write-Host "`n[5/8] Deploying vcpkg to C:\vcpkg..." -ForegroundColor Yellow
+if (!(Test-Path "C:\vkvpkg_lock")) {
+    if (Test-Path "C:\vcpkg") { Remove-Item "C:\vcpkg" -Recurse -Force -ErrorAction SilentlyContinue }
+    git clone --depth=1 https://github.com C:\vcpkg
+    if (Test-Path "C:\vcpkg\bootstrap-vcpkg.bat") {
+        Set-Location "C:\vcpkg"
+        .\bootstrap-vcpkg.bat
+        New-Item -Path "C:\vkvpkg_lock" -ItemType File -Force *>$null
+        Set-Location $env:USERPROFILE
+        Write-Host "vcpkg configured cleanly." -ForegroundColor Green
+    }
+} else { Write-Host "vcpkg is already configured." -ForegroundColor Green }
+
+Write-Host "`n[6/8] Installing MSYS2..." -ForegroundColor Yellow
+winget install --id MSYS2.MSYS2 --exact --accept-source-agreements --accept-package-agreements --silent
+
+Write-Host "`n[7/8] Installing Python Environment (Miniconda, uv, pipx)..." -ForegroundColor Yellow
+winget install --id Anaconda.Miniconda3 --exact --accept-source-agreements --accept-package-agreements --silent
+winget install --id astral-sh.uv --exact --accept-source-agreements --accept-package-agreements --silent
+if (!(Get-Command pipx -ErrorAction SilentlyContinue)) { winget install --id Python.Pipx --exact --accept-source-agreements --accept-package-agreements --silent *>$null }
+
+Write-Host "`n[8/8] Installing JS Runtimes (Node, pnpm, Bun)..." -ForegroundColor Yellow
+winget install --id OpenJS.NodeJS --exact --accept-source-agreements --accept-package-agreements --silent
+winget install --id pnpm.pnpm --exact --accept-source-agreements --accept-package-agreements --silent
+winget install --id Oven.Bun --exact --accept-source-agreements --accept-package-agreements --silent *>$null
+
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+Write-Host "`n=== PROVISIONING SUCCESSFUL! RESTART TERMINAL TO LOAD ENVIRONS ===" -ForegroundColor Green
+Write-Host "Press any key to close this terminal window..." -ForegroundColor Cyan
+[void]$Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
